@@ -48,7 +48,7 @@ jobs:
           ingress-host: ${{ secrets.INGRESS_HOST }}
 ```
 
-### Complete Workflow with Image Building
+### Complete Workflow with Image Building (Simple Build)
 
 ```yaml
 name: Preview Environments
@@ -74,6 +74,73 @@ jobs:
 
           docker build -t mycompany/backend:pr-${{ github.event.pull_request.number }} ./ backend
           docker push mycompany/backend:pr-${{ github.event.pull_request.number }}
+
+      # Deploy preview environment
+      - name: Create preview environment
+        uses: anthonydip/ephemeral-env-action@v1
+        with:
+          action: create
+          pr-number: ${{ github.event.pull_request.number }}
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+          ingress-host: ${{ secrets.INGRESS_HOST }}
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete preview environment
+        uses: anthonydip/ephemeral-env-action@v1
+        with:
+          action: delete
+          pr-number: ${{ github.event.pull_request.number }}
+          kubeconfig: ${{ secrets.KUBECONFIG }}
+          ingress-host: ${{ secrets.INGRESS_HOST }}
+```
+
+### Complete Workflow with Image Building (Optimized Build)
+
+```yaml
+name: Preview Environments
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  build-and-deploy:
+    if: github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build and push frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: mycompany/frontend:pr-${{ github.event.pull_request.number }}
+          cache-from: type=registry,ref=mycompany/frontend:buildcache
+          cache-to: type=registry,ref=mycompany/frontend:buildcache,mode=max
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: mycompany/backend:pr-${{ github.event.pull_request.number }}
+          cache-from: type=registry,ref=mycompany/backend:buildcache
+          cache-to: type=registry,ref=mycompany/backend:buildcache,mode=max
 
       # Deploy preview environment
       - name: Create preview environment
@@ -237,4 +304,3 @@ The environment will be automatically deleted when this PR is closed.
 - Finalizers might be blocking deletion
 - Check for stuck resources: `kubectl get all -n pr-<number>`
 - Manual cleanup: `kubectl delete namespace pr-<number> --force --grace-period=0`
-
