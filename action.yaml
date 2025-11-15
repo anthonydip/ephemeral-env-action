@@ -1,0 +1,138 @@
+name: Ephemeral Environment Manager
+description: Create and delete ephemeral Kubernetes preview environments for pull requests
+author: Anthony Dip
+
+branding:
+  icon: "cloud"
+  color: "blue"
+
+inputs:
+  action:
+    description: "Action to perform (create or delete)"
+    required: true
+  pr-number:
+    description: "Pull request number (e.g., 23)"
+    required: true
+  kubeconfig:
+    description: "Kubernetes config for cluster access (base64 encoded or raw YAML)"
+    required: true
+  ingress-host:
+    description: "Public IP or domain where ingress controller is accessible (e.g., 54.123.45.67 or preview.mycompany.com)"
+    required: true
+  github-token:
+    description: "GitHub token for posting PR comments"
+    required: false
+    default: ${{ github.token }}
+  config-path:
+    description: "Path to ephemeral config file (supports {{PR_NUMBER}} template variable)"
+    required: false
+    default: ".ephemeral-config.yaml"
+  template-dir:
+    description: "Path to Kubernetes Jinja2 template directory"
+    required: false
+    default: "automation/templates/"
+  log-level:
+    description: "Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+    required: false
+    default: "INFO"
+  skip-github:
+    description: "Skip GitHub PR comment integration"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+
+    - name: Install ephemeral-env CLI
+      shell: bash
+      run: |
+        echo "Installing ephemeral-env platform..."
+        pip install --quiet git+https://github.com/anthonydip/ephemeral-env-platform@main
+        echo "Installation complete"
+
+    - name: Validate inputs
+      shell: bash
+      run: |
+        echo "Validating inputs..."
+
+        if [ -z "${{ inputs.kubeconfig }}" ]; then
+          echo "::error::kubeconfig is required but not provided"
+          exit 1
+        fi
+
+        if [ -z "${{ inputs.ingress-host }}" ]; then
+          echo "::error::ingress-host is required but not provided"
+          exit 1
+        fi
+
+        if [ -z "${{ inputs.config-path }}" ]; then
+          echo "::error::Config file not found: ${{ inputs.config-path }}"
+          echo "::error::Make sure you have a .ephemeral-config.yaml file in your repository"
+          exit 1
+        fi
+
+        echo "All inputs validated"
+
+    - name: Configure kubeconfig
+      shell: bash
+      run: |
+        echo "Configuring kubectl access..."
+        mkdir -p ~/.kube
+
+        # Check if kubeconfig is base64 encoded
+        if echo "${{ inputs.kubeconfig }}" | base64 -d > /dev/null 2>&1; then
+          echo "Decoding base64 kubeconfig..."
+          echo "${{ inputs.kubeconfig }}" | base64 -d > ~/.kube/config
+        else
+          echo "Using raw YAML kubeconfig..."
+          echo "${{ inputs.kubeconfig }}" > ~/.kube/config
+        fi
+
+        chmod 600 ~/.kube/config
+        echo "Kubeconfig configured"
+
+    - name: Process config template
+      shell: bash
+      run: |
+        echo "Processing config template..."
+
+        CONFIG_FILE="${{ inputs.config-path }}"
+        PROCESSED_CONFIG="/tmp/ephemeral-config-processed.yaml"
+
+        # Replace {{PR_NUMBER}} placeholder with actual PR number
+        sed "s|{{PR_NUMBER}}|${{ inputs.pr-number }}|g" "$CONFIG_FILE" > "$PROCESSED_CONFIG"
+
+        echo "Processed configuration:"
+        cat "$PROCESSED_CONFIG"
+
+        # Export path for next step
+        echo "EPHEMERAL_CONFIG=$PROCESSED_CONFIG" >> $GITHUB_ENV
+        echo "Template processing complete"
+
+    - name: ${{ inputs.action == 'create' && 'Create' || 'Delete'}} ephemeral environment
+      shell: bash
+      run: |
+        # Build command with all flags
+        CMD="ephemeral ${{ inputs.action }} ${{ inputs.pr-number }}"
+        CMD="$CMD --config $EPHEMERAL_CONFIG"
+        CMD="$CMD --templates ${{ inputs.template-dir }}"
+        CMD="$CMD --log-level ${{ inputs.log-level }}"
+
+        if [ "${{ inputs.skip-github }}" = "true"]; then
+          CMD="$CMD --skip-github"
+        fi
+
+        echo "Executing: $CMD"
+        echo ""
+
+        $CMD
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_REPO: ${{ github.repository }}
+        HOST_PUBLIC_IP: ${{ inputs.ingress-host }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
