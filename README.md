@@ -19,7 +19,7 @@ GitHub Action for creating and deleting ephemeral Kubernetes preview environment
 
 - **Kubernetes cluster** (K3s, GKE, EKS, AKS, etc.)
 - **Traefik ingress controller** installed
-- **Docker images** built and pushed to a registry
+- **Docker images** built and pushed to a registry (depending on workflow setup)
 - **`.ephemeral-config.yaml`** in your repository
 
 ## Quick Start
@@ -48,58 +48,7 @@ jobs:
           ingress-host: ${{ secrets.INGRESS_HOST }}
 ```
 
-### Complete Workflow with Image Building (Simple Build)
-
-```yaml
-name: Preview Environments
-
-on:
-  pull_request:
-    types: [opened, synchronize, reopened, closed]
-
-jobs:
-  build-and-deploy:
-    if: github.event.action != 'closed'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Build Docker images with PR-specific tags
-      - name: Build and push images
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-          docker build -t mycompany/frontend:pr-${{ github.event.pull_request.number }} ./frontend
-          docker push mycompany/frontend:pr-${{ github.event.pull_request.number }}
-
-          docker build -t mycompany/backend:pr-${{ github.event.pull_request.number }} ./ backend
-          docker push mycompany/backend:pr-${{ github.event.pull_request.number }}
-
-      # Deploy preview environment
-      - name: Create preview environment
-        uses: anthonydip/ephemeral-env-action@v1
-        with:
-          action: create
-          pr-number: ${{ github.event.pull_request.number }}
-          kubeconfig: ${{ secrets.KUBECONFIG }}
-          ingress-host: ${{ secrets.INGRESS_HOST }}
-
-  cleanup:
-    if: github.event.action == 'closed'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Delete preview environment
-        uses: anthonydip/ephemeral-env-action@v1
-        with:
-          action: delete
-          pr-number: ${{ github.event.pull_request.number }}
-          kubeconfig: ${{ secrets.KUBECONFIG }}
-          ingress-host: ${{ secrets.INGRESS_HOST }}
-```
-
-### Complete Workflow with Image Building (Optimized Build)
+### Complete Workflow with Image Building
 
 ```yaml
 name: Preview Environments
@@ -192,9 +141,17 @@ services:
       DATABASE_URL: postgres://db:5432/myapp
 ```
 
-**Template Variables:**
+### Template Variables
 
-- `{{PR_NUMBER}}` - Automatically replaced with the PR number (e.g., `123`)
+The action automatically processes your config file and replaces template variables:
+
+- `{{PR_NUMBER}}` - Replaced with the actual PR number (e.g., `123` becomes `mycompany/frontend:pr-123`)
+
+**Why use template variables?**
+
+- One config file works for all PRs (no manual updates)
+- Your workflow builds images with PR-specific tags (see build examples above)
+- The action automatically matches your built images to the config
 
 ### Input Reference
 
