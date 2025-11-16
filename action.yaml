@@ -28,9 +28,9 @@ inputs:
     required: false
     default: ".ephemeral-config.yaml"
   template-dir:
-    description: "Path to Kubernetes Jinja2 template directory"
+    description: "Path to Kubernetes Jinja2 template directory (default: uses bundled templates)"
     required: false
-    default: "automation/templates/"
+    default: ""
   log-level:
     description: "Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     required: false
@@ -120,13 +120,21 @@ runs:
         # Build command with all flags
         CMD="ephemeral ${{ inputs.action }} ${{ inputs.pr-number }}"
         CMD="$CMD --config $EPHEMERAL_CONFIG"
-        CMD="$CMD --templates ${{ inputs.template-dir }}"
         CMD="$CMD --log-level ${{ inputs.log-level }}"
 
-        if [ "${{ inputs.skip-github }}" = "true"]; then
+        # Use optional custom templates if provided
+        if [ -n "${{ inputs.template-dir }}" ]; then
+          echo "Using custom templates from : ${{ inputs.template-dir }}"
+          CMD="$CMD --templates ${{ inputs.template-dir }}"
+        else
+          echo "Using bundled templates (default)"
+        fi
+
+        if [ "${{ inputs.skip-github }}" = "true" ]; then
           CMD="$CMD --skip-github"
         fi
 
+        echo ""
         echo "Executing: $CMD"
         echo ""
 
