@@ -178,46 +178,6 @@ Add these secrets to your repository settings (Settings -> Secrets and variables
 | `DOCKER_USERNAME` | (If building images) Docker Hub username       | -                                       |
 | `DOCKER_PASSWORD` | (If building images) Docker Hub password/token | -                                       |
 
-### Getting Your Kubeconfig
-
-```bash
-# For K3s
-sudo cat /etc/rancher/k3s/k3s.yaml
-
-# For other clusters
-cat ~/.kube/config
-
-# Optional: Base64 encode for GitHub Secrets
-cat ~/.kube/config | base64
-```
-
-### Getting Your Ingress Host
-
-The public IP or domain where your Traefik ingress controller is accessible:
-
-```bash
-# AWS EC2
-curl http://169.254.169.254/latest/meta-data/public-ipv4
-
-# Check ingress controller service
-kubectl get svc -n kube-system traefik
-```
-
-## How It Works
-
-```
-PR Event → GitHub Action → Build Images → Deploy to K8s → Post Preview URL
-                                                              ↓
-                                                http://host/pr-123/
-```
-
-1. **PR opened/updated** → Triggers workflow
-2. **(Optional)** Build Docker images with PR-specific tags
-3. **Action deploys** images to isolated Kubernetes namespace (`pr-<number>`)
-4. **Traefik routes** traffic to `http://<ingress-host>/pr-<number>/`
-5. **GitHub comment** posted with preview URLs
-6. **PR closed** → Namespace and all resources deleted
-
 ## Example Output
 
 When a PR is created, a comment is automatically posted:
@@ -231,33 +191,20 @@ Backend: http://54.123.45.67/pr-123/api
 The environment will be automatically deleted when this PR is closed.
 ```
 
-## Troubleshooting
+## Security Considerations
 
-### Action fails with "kubeconfig not found"
+This action requires access to sensitive secrets (kubeconfig, ingress host). To prevent unauthorized access:
 
-- Verify `KUBECONFIG` secret is added to repository settings
-- Check the kubeconfig is valid YAML or base64 encoded
+**For public repositories**, restrict workflows to same-repo PRs only:
 
-### Action fails with "Config file not found"
+```yaml
+jobs:
+  manage-preview:
+  if: github.event.pull_request.head.repo.full_name == github.repository
+  runs-on: ubuntu-latest
+  # ... rest of job
+```
 
-- Ensure `.ephemeral-config.yaml` exists in your repository root
-- Check the `config-path` input if using a custom location
-- Make sure you have `actions/checkout@v4` before the action
+This prevents PRs from forks from attempting to access your Kubernetes cluster.
 
-### Preview URLs return 404
-
-- Verify Traefik is installed: `kubectl get pods -n kube-system | grep traefik`
-- Check `ingress-host` matches your ingress controller's public IP/domain
-- Verify ingress resources exist: `kubectl get ingress -n pr-<number>`
-
-### GitHub comment not posted
-
-- Verify `GITHUB_TOKEN` has write permissions
-- Check action logs for GitHub API errors
-- Use `skip-github: true` to bypass comment integration
-
-### Namespace won't delete
-
-- Finalizers might be blocking deletion
-- Check for stuck resources: `kubectl get all -n pr-<number>`
-- Manual cleanup: `kubectl delete namespace pr-<number> --force --grace-period=0`
+For private repositories, this is not a concern as only collaborators can create PRs.
